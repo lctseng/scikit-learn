@@ -77,6 +77,7 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
         self.beta_2 = beta_2
         self.epsilon = epsilon
         self.useCuda = useCuda
+        self.fitting = False
         if self.useCuda:
             self.activation += '_cuda'
 
@@ -108,6 +109,7 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
         for i in range(self.n_layers_ - 1):
             activations[i + 1] = safe_sparse_dot(activations[i],
                                                  self.coefs_[i])
+            
             activations[i + 1] += self.intercepts_[i]
 
             # For the hidden layers
@@ -154,7 +156,7 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
         # Iterate over the hidden layers
         for i in range(self.n_layers_ - 1):
             cp.dot(activations[i], self.cuda_coefs_[i], out=activations[i+1])
-            
+            #pdb.set_trace()
             activations[i + 1] += self.cuda_intercepts_[i]
 
             # For the hidden layers
@@ -274,7 +276,10 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
 
         # Forward propagate
         #pdb.set_trace()
+        ts = time.time()
         activations = self._forward_pass(activations)
+        if self.fitting:
+            print("CPU Foward pass: %f ms \n" % ((time.time() - ts) * 1000))
 
         # Get loss
         loss_func_name = self.loss
@@ -355,7 +360,12 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
         
         #pdb.set_trace()
         # Forward propagate
+        
+        ts = time.time()
         activations = self._forward_pass_cuda(activations)
+        if self.fitting:
+            print("GPU Foward pass: %f ms \n" % ((time.time() - ts) * 1000)) 
+
 
         # Get loss
         loss_func_name = self.loss
@@ -638,7 +648,8 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
     def _fit_stochastic(self, X, y, activations, deltas, coef_grads,
                         intercept_grads, layer_units, incremental):
 
-        
+        #pdb.set_trace()
+        self.fitting = True
         if not incremental or not hasattr(self, '_optimizer'):
             params = self.coefs_ + self.intercepts_
 
@@ -678,14 +689,14 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
             PRINT_FIRST_BATCH_TIME = True
 
             #pdb.set_trace()
-
+            
             if self.useCuda:
                 # Prepare CUDA memeory
                 
 
                 # Traning data
-                cuda_X = cp.empty(X.shape, X.dtype)
-                cuda_y = cp.empty(y.shape, y.dtype)
+                cuda_X = cp.empty(X[slice(batch_size)].shape, X.dtype)
+                cuda_y = cp.empty(y[slice(batch_size)].shape, y.dtype)
                 
                 
 
@@ -711,8 +722,8 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
 
                 if self.useCuda:
                     # Copy shuffled X, y  to GPU
-                    cuda_X.set(X)
-                    cuda_y.set(y)
+                    cuda_X.set(X[slice(batch_size)])
+                    cuda_y.set(y[slice(batch_size)])
 
                 accumulated_loss = 0.0
                 
@@ -725,7 +736,7 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
                 for batch_slice in gen_batches(n_samples, batch_size):
                     
 
-
+                    print("Batch: %s \n" % repr(batch_slice))
                     #pdb.set_trace()
                     if DUMP_INPUT_DATA:
                         DUMP_INPUT_DATA = False
@@ -840,7 +851,7 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
                             self.cuda_coefs_[i].set(self.coefs_[i])
                         for i in range(0, len(self.intercepts_)):
                             self.cuda_intercepts_[i].set(self.intercepts_[i])
-
+                    break
                     
                     
                 
@@ -896,6 +907,8 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
             # restore best weights
             self.coefs_ = self._best_coefs
             self.intercepts_ = self._best_intercepts
+        
+        self.fitting = False
 
     def _update_no_improvement_count(self, early_stopping, X_val, y_val):
         if early_stopping:
